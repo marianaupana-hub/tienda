@@ -208,10 +208,19 @@ async function activateUser(user){
  updateAuthButtons(user);setCs('☁ Conectando con Firebase…');
  try{await loadCloud()}catch(e){console.error('No se pudieron cargar los datos de Firebase',e);setCs('No se pudieron cargar los datos de Firebase')}
 }
-function signInGoogle(){
+async function signInGoogle(){
  if(!firebaseAuth)return toast('Firebase no está disponible');
  const provider=new firebase.auth.GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});
- firebaseAuth.signInWithRedirect(provider).catch(e=>{console.error('No se pudo iniciar sesión con Google',e);setCs('No se pudo iniciar sesión con Google')})
+ try{await firebaseAuth.signInWithPopup(provider)}
+ catch(e){
+  if(e.code==='auth/popup-blocked'||e.code==='auth/operation-not-supported-in-this-environment'){
+   try{await firebaseAuth.signInWithRedirect(provider)}
+   catch(redirectError){console.error('No se pudo iniciar sesión con Google',redirectError);setCs('No se pudo iniciar sesión con Google')}
+   return
+  }
+  console.error('No se pudo iniciar sesión con Google',e);
+  setCs(e.code==='auth/popup-closed-by-user'?'Inicio de sesión cancelado':'No se pudo iniciar sesión con Google')
+ }
 }
 function signOutGoogle(){if(firebaseAuth)firebaseAuth.signOut().catch(e=>{console.error('No se pudo cerrar sesión',e);setCs('No se pudo cerrar sesión')})}
 function initCloud(){
