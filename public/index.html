@@ -54,7 +54,7 @@ h1{font:600 28px Georgia,serif;letter-spacing:1.5px;margin:4px 0 0;color:var(--a
 <div class="r2"><input id="pp" type="number" inputmode="decimal" step="0.01" placeholder="Precio venta (Q)"><input id="pco" type="number" inputmode="decimal" step="0.01" placeholder="Costo (Q)"></div>
 <input id="pq" type="number" inputmode="numeric" value="1" placeholder="Cantidad">
 <label class="mu" for="pimg">Foto del producto (opcional)</label>
-<input id="pimg" type="file" accept="image/*" capture="environment" onchange="previewPhoto(this)">
+<input id="pimg" type="file" accept="image/*" onchange="previewPhoto(this)">
 <div id="photoPreviewBox" hidden><img id="photoPreview" class="photo-preview" alt="Vista previa de la foto"><button class="g" type="button" onclick="clearPhoto()">Quitar foto</button></div>
 <button id="addProductBtn" style="width:100%" onclick="addP()">Registrar producto</button>
 <small style="margin-top:8px">Cada combinación de nombre + talla + color tiene su propio código. Si ya existe, se suma la cantidad.</small>
