@@ -8,6 +8,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <style>
 :root{--bg:#0e0e10;--card:#1a1a1d;--tx:#f4eef0;--mu:#9b9499;--ac:#e8a0b8;--bd:#2e2c30;--dg:#ff8a9b;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:dark}
 *{box-sizing:border-box}
@@ -32,6 +35,9 @@ section{display:none}section.on{display:block}
 .hit{padding:10px;border-bottom:1px solid var(--bd);cursor:pointer}
 .product-photo{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--bd);flex:0 0 auto}
 .photo-preview{width:88px;height:88px;object-fit:cover;border-radius:10px;border:1px solid var(--bd);margin-bottom:8px}
+.account-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 8px}
+.account-row small{flex:1;min-width:160px}
+.account-row button{font-size:13px;padding:8px 10px}
 #toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 10px);transform:translateX(-50%);background:var(--ac);color:#1a1a1d;padding:10px 16px;border-radius:20px;opacity:0;transition:.3s;pointer-events:none;z-index:99;max-width:90%;text-align:center}
 #toast.on{opacity:1}
 #scan{display:none;position:fixed;inset:0;background:#000d;z-index:50;padding:20px;flex-direction:column;justify-content:center;gap:12px}
@@ -44,7 +50,8 @@ h1{font:600 28px Georgia,serif;letter-spacing:1.5px;margin:4px 0 0;color:var(--a
 <div id="toast"></div>
 <div id="scan"><div id="reader"></div><p style="color:#fff;text-align:center;margin:0">Apunta al código de barras</p><button class="g" onclick="closeScan()">Cancelar</button></div>
 
-<h1 id="brand" onclick="setBrand()"></h1><small id="cloud" style="margin:2px 0 8px">Guardado solo en este teléfono</small>
+<h1 id="brand" onclick="setBrand()"></h1>
+<div class="account-row"><small id="cloud">Guardado solo en este dispositivo</small><button id="googleSignIn" class="g" onclick="signInGoogle()">Vincular con Google</button><button id="googleSignOut" class="g" onclick="signOutGoogle()" hidden>Cerrar sesión</button></div>
 <section id="s-p" class="on">
 <h2>Productos</h2>
 <div class="card">
@@ -93,9 +100,11 @@ h1{font:600 28px Georgia,serif;letter-spacing:1.5px;margin:4px 0 0;color:var(--a
 
 <script>
 const $=id=>document.getElementById(id);
-const K='fx1';let db={products:[],invoices:[],n:0};
-try{const s=localStorage.getItem(K);if(s)db=JSON.parse(s)}catch(e){}
-const save=()=>{try{localStorage.setItem(K,JSON.stringify(db))}catch(e){}sync()};
+const K='fx1',emptyDb=()=>({products:[],invoices:[],n:0});
+function readLocalDb(key){try{const s=localStorage.getItem(key);if(!s)return null;const d=JSON.parse(s);return d&&Array.isArray(d.products)&&Array.isArray(d.invoices)?d:null}catch(e){return null}}
+function writeLocalDb(key,value){try{localStorage.setItem(key,JSON.stringify(value));return true}catch(e){console.error('No se pudieron guardar los datos localmente',e);return false}}
+let storageKey=K,db=readLocalDb(K)||emptyDb();
+const save=()=>{if(!writeLocalDb(storageKey,db)){setCs('No hay espacio suficiente en este dispositivo para guardar los datos');return}sync()};
 const full=p=>p.name+[p.size,p.color].filter(Boolean).map(x=>' · '+x).join('');
 const txt=p=>norm(full(p)+' '+(p.cat||'')+' '+(p.brand||''));
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -167,22 +176,57 @@ const cv=v=>'"'+String(v).replace(/"/g,'""')+'"';
 function csvP(){out(new Blob(['\ufeff'+['Codigo,Producto,Categoria,Marca,Talla,Color,Precio,Costo,Cantidad',...db.products.map(p=>[p.code,cv(p.name),cv(p.cat||''),cv(p.brand||''),cv(p.size||''),cv(p.color||''),p.price,p.cost||0,p.stock].join(','))].join('\n')],{type:'text/csv'}),'productos.csv','text/csv',true)}
 function csvF(){out(new Blob(['\ufeff'+['Factura,Fecha,Cliente,Telefono,Total,Detalle',...db.invoices.map(r=>[r.n,cv(r.date),cv(r.name),cv(r.phone||''),r.total,cv(r.items.map(i=>i.qty+'x '+i.name).join('; '))].join(','))].join('\n')],{type:'text/csv'}),'facturas.csv','text/csv',true)}
 function setBrand(){const v=prompt('Nombre de tu tienda',db.store||'Mi Boutique');if(v&&v.trim()){db.store=v.trim();save();$('brand').textContent='✦ '+db.store}}
-let rdb=null,uid=null,sy={},sq=Promise.resolve();
+let rdb=null,uid=null,sy={},sq=Promise.resolve(),firebaseAuth=null;
 const setCs=m=>{$('cloud').textContent=m};
-function sync(){if(rdb)sq=sq.then(doSync)}
-async function doSync(){try{const col=rdb.collection('data/users/'+uid),now={};
-db.products.forEach(p=>now['p'+p.code]=p);db.invoices.forEach(r=>now['i'+r.n]=r);now.meta={store:db.store||'',n:db.n};
-for(const k in now){const s=JSON.stringify(now[k]);if(sy[k]!==s){await col.doc(k).set(now[k]);sy[k]=s}}
-for(const k in sy)if(!(k in now)){await col.doc(k).delete();delete sy[k]}
-setCs('☁ Guardado en la nube')}catch(e){setCs('☁ No se pudo sincronizar')}}
-async function initCloud(){try{const [d,u]=await Promise.all([claude.use('db'),claude.use('user')]);
-if(!d||!u){setCs('Sin nube: inicia sesión en claude.ai (datos solo en este teléfono)');return}
-uid=await u.id();if(!uid)return;const col=d.collection('data/users/'+uid);setCs('☁ Conectando…');
-const snap=await col.get();
-snap.docs.forEach(s=>{const x=s.data(),k=s.id;sy[k]=JSON.stringify(x);
-if(k==='meta'){if(x.store)db.store=x.store;db.n=Math.max(db.n,x.n||0)}
-else if(k[0]==='p'){const i=db.products.findIndex(p=>p.code===x.code);i<0?db.products.push(x):db.products[i]=x}
-else{const i=db.invoices.findIndex(r=>r.n===x.n);i<0?db.invoices.push(x):db.invoices[i]=x;db.n=Math.max(db.n,x.n)}});
-db.invoices.sort((a,b)=>a.n-b.n);rdb=d;save();rP();$('brand').textContent='✦ '+(db.store||'Mi Boutique')}catch(e){setCs('Sin nube (datos solo en este teléfono)')}}
+function updateAuthButtons(user){$('googleSignIn').hidden=!!user;$('googleSignOut').hidden=!user}
+function mergeLocalMissing(target,source){
+ source.products.forEach(p=>{if(!target.products.some(x=>x.code===p.code))target.products.push(p)});
+ source.invoices.forEach(r=>{if(!target.invoices.some(x=>x.n===r.n))target.invoices.push(r)});
+ target.n=Math.max(target.n||0,source.n||0);if(!target.store&&source.store)target.store=source.store
+}
+function sync(){if(!rdb||!uid)return Promise.resolve();sq=sq.then(doSync).catch(e=>{console.error('Error al sincronizar con Firebase',e);setCs('No se pudo sincronizar con Firebase')});return sq}
+async function doSync(){
+ const store=rdb,account=uid,synced=sy,snapshot=JSON.parse(JSON.stringify(db)),col=store.collection('facturasUsers/'+account+'/records'),now={};
+ snapshot.products.forEach(p=>now['p'+p.code]=p);snapshot.invoices.forEach(r=>now['i'+r.n]=r);now.meta={store:snapshot.store||'',n:snapshot.n};
+ for(const k in now){const s=JSON.stringify(now[k]);if(synced[k]!==s){await col.doc(k).set(now[k]);if(store!==rdb||account!==uid)return;synced[k]=s}}
+ for(const k in synced)if(!(k in now)){await col.doc(k).delete();if(store!==rdb||account!==uid)return;delete synced[k]}
+ setCs('☁ Sincronizado con Firebase')
+}
+async function loadCloud(){
+ const col=rdb.collection('facturasUsers/'+uid+'/records'),snap=await col.get();
+ snap.docs.forEach(s=>{const x=s.data(),k=s.id;
+ if(k==='meta'){sy[k]=JSON.stringify(x);if(x.store)db.store=x.store;db.n=Math.max(db.n,x.n||0)}
+ else if(k[0]==='p'&&x.code){sy[k]=JSON.stringify(x);const i=db.products.findIndex(p=>p.code===x.code);i<0?db.products.push(x):db.products[i]=x}
+ else if(k[0]==='i'&&Number.isFinite(x.n)){sy[k]=JSON.stringify(x);const i=db.invoices.findIndex(r=>r.n===x.n);i<0?db.invoices.push(x):db.invoices[i]=x;db.n=Math.max(db.n,x.n)}});
+ db.invoices.sort((a,b)=>a.n-b.n);rP();rI();$('brand').textContent='✦ '+(db.store||'Mi Boutique');await sync()
+}
+async function activateUser(user){
+ const userKey=K+':'+user.uid,accountDb=readLocalDb(userKey),legacy=storageKey===K?readLocalDb(K):null;
+ db=accountDb||legacy||emptyDb();if(accountDb&&legacy)mergeLocalMissing(db,legacy);
+ storageKey=userKey;uid=user.uid;sy={};
+ if(writeLocalDb(userKey,db)&&legacy)try{localStorage.removeItem(K)}catch(e){console.error('No se pudieron limpiar los datos locales anteriores',e)}
+ updateAuthButtons(user);setCs('☁ Conectando con Firebase…');
+ try{await loadCloud()}catch(e){console.error('No se pudieron cargar los datos de Firebase',e);setCs('No se pudieron cargar los datos de Firebase')}
+}
+function signInGoogle(){
+ if(!firebaseAuth)return toast('Firebase no está disponible');
+ const provider=new firebase.auth.GoogleAuthProvider();provider.setCustomParameters({prompt:'select_account'});
+ firebaseAuth.signInWithRedirect(provider).catch(e=>{console.error('No se pudo iniciar sesión con Google',e);setCs('No se pudo iniciar sesión con Google')})
+}
+function signOutGoogle(){if(firebaseAuth)firebaseAuth.signOut().catch(e=>{console.error('No se pudo cerrar sesión',e);setCs('No se pudo cerrar sesión')})}
+function initCloud(){
+ if(typeof firebase==='undefined'){setCs('Firebase no está disponible; los datos quedan en este dispositivo');return}
+ try{
+  const app=firebase.initializeApp({apiKey:'AIzaSyArhik2SVlLuD7HoeZ_Oj2oeSPDuhDXs2w',authDomain:'tienda-3d54d.firebaseapp.com',projectId:'tienda-3d54d',storageBucket:'tienda-3d54d.firebasestorage.app',messagingSenderId:'785831038775',appId:'1:785831038775:web:0f8ce873266e72812fd4b2'});
+  firebaseAuth=app.auth();rdb=app.firestore();
+  firebaseAuth.getRedirectResult().catch(e=>{console.error('Error en el acceso con Google',e);setCs('No se pudo completar el acceso con Google')});
+  firebaseAuth.onAuthStateChanged(user=>{
+   if(user){activateUser(user);return}
+   const hadUser=!!uid;uid=null;rdb=app.firestore();sy={};sq=Promise.resolve();storageKey=K;
+   if(hadUser){db=readLocalDb(K)||emptyDb();rP();rI();$('brand').textContent='✦ '+(db.store||'Mi Boutique')}
+   updateAuthButtons(null);setCs('Guardado en este dispositivo; vincula Google para sincronizar')
+  },e=>{console.error('No se pudo comprobar la sesión de Firebase',e);setCs('No se pudo comprobar la sesión de Firebase')})
+ }catch(e){console.error('No se pudo iniciar Firebase',e);setCs('No se pudo iniciar Firebase; los datos quedan en este dispositivo')}
+}
 rP();rI();$('brand').textContent='✦ '+(db.store||'Mi Boutique');initCloud();
 </script></body></html>
