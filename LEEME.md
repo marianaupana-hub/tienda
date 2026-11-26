@@ -15,7 +15,9 @@
 - Luego: Compartir > "Añadir a pantalla de inicio".
 
 ## Datos
-- Se guardan en el navegador (localStorage) del dispositivo y de esa dirección web. Si cambias de dirección, empiezas vacío.
+- Sin iniciar sesión, los datos se guardan en el navegador de este dispositivo.
+- Pulsa "Vincular con Google" para sincronizar productos, fotos y facturas con Firebase. Usa la misma cuenta de Google en tus dispositivos.
+- Al vincular por primera vez, los datos locales se combinan con los de tu cuenta de Firebase.
 - Haz respaldos con los botones CSV del Historial (abren en Excel o Google Sheets).
-- Fuera de claude.ai no hay guardado en la nube; la página lo detecta y sigue funcionando local.
+- Los datos de cada cuenta están protegidos por reglas de Firestore; no compartas tus credenciales.
 - Las librerías (códigos de barras, PDF, escáner) se cargan desde cdnjs.cloudflare.com: se necesita internet la primera vez.
